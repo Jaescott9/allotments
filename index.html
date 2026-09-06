@@ -1,0 +1,484 @@
+import { useState, useRef, useEffect } from "react";
+
+const CUSTOMER_ACCOUNTS = {
+  "Elsa's company":        ["123456", "987654"],
+  "Nordic Freight AB":     ["100001", "100002"],
+  "Atlantic Cargo Ltd":    ["200001"],
+  "Baltic Transport GmbH": ["300001", "300002", "300003"],
+  "North Sea Logistics":   ["400001", "400002"],
+};
+const CUSTOMERS = Object.keys(CUSTOMER_ACCOUNTS);
+
+const VESSELS = ["Ark Futura", "Ark Germania", "Magnolia Seaways", "Petunia Seaways", "Begonia Seaways", "Optima Seaways", "Primula Seaways", "Any vessel"];
+const ROUTE_GROUPS = [
+  { label: "Gothenburg – Immingham", routes: ["GOTIMM", "IMMGOT"] },
+  { label: "Gothenburg – Ghent",     routes: ["GOTGHE", "GHEGOT"] },
+  { label: "Rosslare – Dunkirk",     routes: ["ROTFXT", "FXTROT"] },
+  { label: "Esbjerg – Immingham",    routes: ["ESBIMM", "IMMEBS"] },
+];
+const ROUTE_OPTIONS = ROUTE_GROUPS.map(g => ({ group: g.label, options: g.routes.map(r => ({ code: r, label: r })) }));
+const UNIT_OPTIONS = [
+  { code: "TRA", label: "TRA — trailer" },
+  { code: "SDR", label: "SDR — self-drive" },
+  { code: "CTR", label: "CTR — container" },
+  { code: "RFR", label: "RFR — reefer container" },
+  { code: "VEH", label: "VEH — vehicle" },
+  { code: "BLK", label: "BLK — bulk" },
+  { code: "LCL", label: "LCL — less than container" },
+];
+const EXCL_OPTIONS = [
+  { code: "TRA", label: "TRA — trailer" },
+  { code: "SDR", label: "SDR — self-drive" },
+  { code: "CTR", label: "CTR — container" },
+  { code: "RFR", label: "RFR — reefer container" },
+  { code: "IMO", label: "IMO — hazardous" },
+  { code: "EMP", label: "EMP — empty" },
+  { code: "OOG", label: "OOG — out of gauge" },
+];
+const SEASONAL_OPTIONS = [
+  { value: "none",                          label: "None" },
+  { value: "01/01 - 31/03",                 label: "01/01 – 31/03 (Q1)" },
+  { value: "01/04 - 30/06",                 label: "01/04 – 30/06 (Q2)" },
+  { value: "01/07 - 30/09",                 label: "01/07 – 30/09 (Q3)" },
+  { value: "01/10 - 31/12",                 label: "01/10 – 31/12 (Q4)" },
+  { value: "01/01 - 31/03, 01/10 - 31/12", label: "Q1 + Q4" },
+  { value: "custom",                        label: "Custom range..." },
+];
+const DAYS_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const HEADERS = ["Account no.","Customer","Allotment type","Valid from","Valid to","Route leg","Vessel","Allotments","Unit types","Excluded unit types","Day","Departure time","Seasonal restrictions"];
+
+const EMPTY_FORM = {
+  customer: "", accNo: "", allotType: "", validFrom: "", validTo: "",
+  routeLegs: [], vessel: "", allotments: "", seasonal: "none", customSeasonal: "",
+  unitTypes: [], exclTypes: [], days: [], times: {},
+};
+
+function MultiSelect({ options, grouped, selected, onChange, placeholder, borderColor }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const toggle = (code) =>
+    onChange(selected.includes(code) ? selected.filter(c => c !== code) : [...selected, code]);
+
+  const renderOption = (o) => (
+    <div key={o.code} onClick={() => toggle(o.code)} style={{
+      padding: "8px 12px", fontSize: 13, cursor: "pointer",
+      display: "flex", alignItems: "center", gap: 8,
+      background: selected.includes(o.code) ? "#f0fdf4" : "#fff",
+      color: selected.includes(o.code) ? "#166534" : "#111",
+    }}>
+      <span style={{
+        width: 14, height: 14, borderRadius: 3, border: "1px solid", flexShrink: 0,
+        borderColor: selected.includes(o.code) ? "#16a34a" : "#d1d5db",
+        background: selected.includes(o.code) ? "#16a34a" : "#fff",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff",
+      }}>{selected.includes(o.code) ? "✓" : ""}</span>
+      {o.label}
+    </div>
+  );
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: "100%", minHeight: 36, padding: "0 10px", fontSize: 13,
+        border: `1px solid ${borderColor || "#d1d5db"}`, borderRadius: 6,
+        background: "#fff", cursor: "pointer", textAlign: "left",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        color: selected.length ? "#111" : "#9ca3af",
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected.length ? selected.join(", ") : placeholder}
+        </span>
+        <span style={{ marginLeft: 6, fontSize: 11, flexShrink: 0 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", zIndex: 100, top: "100%", left: 0, right: 0,
+          background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.10)", marginTop: 2,
+          maxHeight: 240, overflowY: "auto",
+        }}>
+          {grouped
+            ? grouped.map(g => (
+                <div key={g.group}>
+                  <div style={{ padding: "6px 12px 4px", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", background: "#f9fafb", borderBottom: "1px solid #f3f4f6" }}>
+                    {g.group}
+                  </div>
+                  {g.options.map(renderOption)}
+                </div>
+              ))
+            : (options || []).map(renderOption)
+          }
+        </div>
+      )}
+      {selected.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+          {selected.map(c => (
+            <span key={c} style={{
+              display: "flex", alignItems: "center", gap: 3, padding: "2px 8px",
+              background: "#f0fdf4", border: "1px solid #bbf7d0",
+              borderRadius: 12, fontSize: 11, color: "#166534",
+            }}>
+              {c}
+              <button onClick={() => toggle(c)} style={{ border: "none", background: "none", cursor: "pointer", color: "#4ade80", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, required, children, style }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
+      <label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {label}{required && <span style={{ color: "#ef4444", marginLeft: 2 }}>*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+function Section({ title, children }) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 18px", marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+function Grid({ cols = 3, children }) {
+  return <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 12 }}>{children}</div>;
+}
+
+const inputStyle  = { height: 36, padding: "0 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 6, background: "#fff", color: "#111", outline: "none", width: "100%" };
+const selectStyle = { ...inputStyle, cursor: "pointer", appearance: "auto" };
+
+function buildCSV(entries) {
+  const escape = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const rows = entries.flatMap(e =>
+    e.dayTimes.map(({ day, time }) =>
+      [e.accNo, e.customer, e.allotType, e.validFrom, e.validTo, e.routeLeg,
+       e.vessel, e.allotments, e.unitTypes, e.exclTypes, day, time, e.seasonal].map(escape).join(",")
+    )
+  );
+  return [HEADERS.map(escape).join(","), ...rows].join("\n");
+}
+
+export default function AllotmentForm() {
+  const [form, setForm]       = useState({ ...EMPTY_FORM });
+  const [entries, setEntries] = useState([]);
+  const [errors, setErrors]   = useState({});
+  const [showCSV, setShowCSV] = useState(false);
+  const [copied, setCopied]   = useState(false);
+  const csvRef = useRef();
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const handleCustomerChange = (customer) => {
+    setForm(f => ({ ...f, customer, accNo: "" }));
+  };
+
+  const availableAccounts = form.customer ? CUSTOMER_ACCOUNTS[form.customer] || [] : [];
+
+  const validate = () => {
+    const e = {};
+    if (!form.customer)              e.customer  = "Required";
+    if (!form.accNo)                 e.accNo     = "Required";
+    if (!form.allotType)             e.allotType = "Required";
+    if (form.routeLegs.length === 0) e.routeLegs = "Select at least one";
+    if (!form.allotments || isNaN(form.allotments)) e.allotments = "Required";
+    if (form.unitTypes.length === 0) e.unitTypes = "Select at least one";
+    if (form.days.length === 0)      e.days      = "Select at least one day";
+    if (!form.validFrom) e.validFrom = "Required";
+    if (!form.validTo)   e.validTo   = "Required";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const toggleDay = (day) => {
+    const next = form.days.includes(day) ? form.days.filter(d => d !== day) : [...form.days, day];
+    set("days", next);
+  };
+
+  const addEntry = () => {
+    if (!validate()) return;
+    const sortedDays = [...form.days].sort((a, b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
+    const dayTimes   = sortedDays.map(d => ({ day: d, time: form.times[d] || "" }));
+    const seasonal   = form.seasonal === "custom" ? form.customSeasonal : form.seasonal === "none" ? "None" : form.seasonal;
+    setEntries(prev => [...prev, {
+      customer: form.customer, accNo: form.accNo, allotType: form.allotType,
+      validFrom: form.validFrom || "—", validTo: form.validTo || "—",
+      routeLeg: form.routeLegs.join(", "), vessel: form.vessel || "Any",
+      allotments: form.allotments,
+      unitTypes: form.unitTypes.join(", "),
+      exclTypes: form.exclTypes.length ? form.exclTypes.join(", ") : "None",
+      dayTimes, seasonal,
+    }]);
+    setForm({ ...EMPTY_FORM });
+    setErrors({});
+    setShowCSV(false);
+  };
+
+  const removeEntry = (i) => setEntries(prev => prev.filter((_, idx) => idx !== i));
+
+  const handleCopy = () => {
+    if (csvRef.current) {
+      csvRef.current.select();
+      document.execCommand("copy");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const sortedSelDays = [...form.days].sort((a, b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
+  const csvText       = entries.length > 0 ? buildCSV(entries) : "";
+
+  return (
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#f9fafb", minHeight: "100vh", padding: "24px 20px" }}>
+      <div style={{ maxWidth: 760, margin: "0 auto" }}>
+
+        <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Freight allotments</div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: "#111827", margin: 0 }}>New allotment entry</h1>
+          <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Complete all required fields. Use multi-select fields to assign multiple values.</p>
+        </div>
+
+        {/* Account */}
+        <Section title="Account">
+          <Grid cols={3}>
+            <Field label="Customer" required>
+              <select style={{ ...selectStyle, borderColor: errors.customer ? "#fca5a5" : "#d1d5db" }}
+                value={form.customer} onChange={e => handleCustomerChange(e.target.value)}>
+                <option value="">Select customer...</option>
+                {CUSTOMERS.map(c => <option key={c}>{c}</option>)}
+              </select>
+              {errors.customer && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.customer}</span>}
+            </Field>
+            <Field label="Account no." required>
+              <select style={{ ...selectStyle, opacity: !form.customer ? 0.5 : 1, borderColor: errors.accNo ? "#fca5a5" : "#d1d5db" }}
+                value={form.accNo} onChange={e => set("accNo", e.target.value)} disabled={!form.customer}>
+                <option value="">{form.customer ? "Select account..." : "Select customer first"}</option>
+                {availableAccounts.map(a => <option key={a}>{a}</option>)}
+              </select>
+              {errors.accNo && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.accNo}</span>}
+            </Field>
+            <Field label="Contractual allotment" required>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["Yes", "No"].map(opt => {
+                  const val = opt === "Yes" ? "Contractual" : "Non-contractual";
+                  const active = form.allotType === val;
+                  return (
+                    <button key={opt} onClick={() => set("allotType", val)} style={{
+                      flex: 1, height: 36, fontSize: 13, fontWeight: active ? 600 : 400,
+                      borderRadius: 6, border: `1px solid ${errors.allotType ? "#fca5a5" : active ? "#16a34a" : "#d1d5db"}`,
+                      background: active ? "#16a34a" : "#fff",
+                      color: active ? "#fff" : "#374151", cursor: "pointer", transition: "all 0.15s",
+                    }}>{opt}</button>
+                  );
+                })}
+              </div>
+              {errors.allotType && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.allotType}</span>}
+            </Field>
+          </Grid>
+        </Section>
+
+        {/* Validity */}
+        <Section title="Validity">
+          <Grid cols={3}>
+            <Field label="Valid from" required={form.allotType === "Contractual"}>
+              <input type="date"
+                style={{ ...inputStyle, borderColor: errors.validFrom ? "#fca5a5" : "#d1d5db" }}
+                value={form.validFrom} onChange={e => set("validFrom", e.target.value)} />
+              {errors.validFrom && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.validFrom}</span>}
+            </Field>
+            <Field label="Valid to" required={form.allotType === "Contractual"}>
+              <input type="date"
+                style={{ ...inputStyle, borderColor: errors.validTo ? "#fca5a5" : "#d1d5db" }}
+                value={form.validTo} onChange={e => set("validTo", e.target.value)} />
+              {errors.validTo && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.validTo}</span>}
+            </Field>
+            <Field label="Seasonal restriction">
+              <select style={selectStyle} value={form.seasonal} onChange={e => set("seasonal", e.target.value)}>
+                {SEASONAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+          </Grid>
+          {form.seasonal === "custom" && (
+            <div style={{ marginTop: 10 }}>
+              <Field label="Custom range (e.g. 15/03 – 15/09)">
+                <input style={inputStyle} value={form.customSeasonal} onChange={e => set("customSeasonal", e.target.value)} placeholder="dd/mm - dd/mm" />
+              </Field>
+            </div>
+          )}
+        </Section>
+
+        {/* Route & Capacity */}
+        <Section title="Route & capacity">
+          <Grid cols={3}>
+            <Field label="Route leg" required>
+              <MultiSelect grouped={ROUTE_OPTIONS} selected={form.routeLegs}
+                onChange={v => set("routeLegs", v)} placeholder="Select route legs..."
+                borderColor={errors.routeLegs ? "#fca5a5" : undefined} />
+              {errors.routeLegs && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.routeLegs}</span>}
+            </Field>
+            <Field label="Vessel">
+              <select style={selectStyle} value={form.vessel} onChange={e => set("vessel", e.target.value)}>
+                <option value="">Any vessel</option>
+                {VESSELS.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="Allotments (units)" required>
+              <input type="number" min={1} max={999}
+                style={{ ...inputStyle, borderColor: errors.allotments ? "#fca5a5" : "#d1d5db" }}
+                value={form.allotments} onChange={e => set("allotments", e.target.value)} placeholder="e.g. 12" />
+              {errors.allotments && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.allotments}</span>}
+            </Field>
+          </Grid>
+        </Section>
+
+        {/* Unit Types */}
+        <Section title="Unit types">
+          <Grid cols={2}>
+            <Field label="Included unit types" required>
+              <MultiSelect options={UNIT_OPTIONS} selected={form.unitTypes}
+                onChange={v => set("unitTypes", v)} placeholder="Select unit types..."
+                borderColor={errors.unitTypes ? "#fca5a5" : undefined} />
+              {errors.unitTypes && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.unitTypes}</span>}
+            </Field>
+            <Field label="Excluded unit types">
+              <MultiSelect options={EXCL_OPTIONS} selected={form.exclTypes}
+                onChange={v => set("exclTypes", v)} placeholder="None / select to exclude..." />
+            </Field>
+          </Grid>
+        </Section>
+
+        {/* Days & Times */}
+        <Section title="Valid on days & departure times">
+          <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Days<span style={{ color: "#ef4444" }}>*</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: errors.days ? 4 : 14 }}>
+            {DAYS_ORDER.map(d => (
+              <button key={d} onClick={() => toggleDay(d)} style={{
+                padding: "5px 13px", fontSize: 13, borderRadius: 20, border: "1px solid", cursor: "pointer", transition: "all 0.15s",
+                borderColor: form.days.includes(d) ? "#16a34a" : "#d1d5db",
+                background:  form.days.includes(d) ? "#16a34a" : "#fff",
+                color:       form.days.includes(d) ? "#fff"    : "#374151",
+                fontWeight:  form.days.includes(d) ? 600 : 400,
+              }}>{d}</button>
+            ))}
+          </div>
+          {errors.days && <div style={{ fontSize: 11, color: "#ef4444", marginBottom: 10 }}>{errors.days}</div>}
+          {sortedSelDays.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Departure time per day <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional — leave blank for all sailings)</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                {sortedSelDays.map(d => (
+                  <div key={d} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", minWidth: 32 }}>{d}</span>
+                    <input type="time"
+                      style={{ ...inputStyle, flex: 1, height: 32, fontSize: 13 }}
+                      value={form.times[d] || ""}
+                      onChange={e => set("times", { ...form.times, [d]: e.target.value })} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+          <button onClick={() => { setForm({ ...EMPTY_FORM }); setErrors({}); }} style={{
+            padding: "9px 20px", fontSize: 13, fontWeight: 500, borderRadius: 7,
+            border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer",
+          }}>Clear form</button>
+          <button onClick={addEntry} style={{
+            padding: "9px 22px", fontSize: 13, fontWeight: 600, borderRadius: 7,
+            border: "1px solid #16a34a", background: "#16a34a", color: "#fff", cursor: "pointer",
+          }}>Add entry ↗</button>
+        </div>
+
+        {/* Entries */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Entries ({entries.length})
+            </span>
+            {entries.length > 0 && (
+              <button onClick={() => setShowCSV(v => !v)} style={{
+                padding: "5px 14px", fontSize: 12, fontWeight: 500, borderRadius: 6,
+                border: "1px solid #d1d5db", background: showCSV ? "#f3f4f6" : "#fff", color: "#374151", cursor: "pointer",
+              }}>{showCSV ? "Hide CSV" : "Export CSV ↓"}</button>
+            )}
+          </div>
+
+          {/* CSV panel */}
+          {showCSV && entries.length > 0 && (
+            <div style={{ marginBottom: 14, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>Copy and paste into Excel, or save as a .csv file</span>
+                <button onClick={handleCopy} style={{
+                  padding: "4px 12px", fontSize: 12, fontWeight: 500, borderRadius: 5,
+                  border: "1px solid #d1d5db", background: copied ? "#16a34a" : "#fff",
+                  color: copied ? "#fff" : "#374151", cursor: "pointer", transition: "all 0.2s",
+                }}>
+                  {copied ? "Copied!" : "Copy all"}
+                </button>
+              </div>
+              <textarea
+                ref={csvRef}
+                readOnly
+                value={csvText}
+                style={{
+                  width: "100%", minHeight: 140, padding: "10px 12px", fontSize: 11,
+                  fontFamily: "monospace", border: "none", resize: "vertical",
+                  background: "#fff", color: "#374151", outline: "none", display: "block",
+                }}
+              />
+            </div>
+          )}
+
+          {entries.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: "28px 16px", border: "1px dashed #e5e7eb", borderRadius: 8 }}>
+              No entries added yet
+            </div>
+          ) : entries.map((e, i) => (
+            <div key={i} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px", marginBottom: 8, position: "relative" }}>
+              <button onClick={() => removeEntry(i)} style={{ position: "absolute", top: 10, right: 12, border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: 16, lineHeight: 1 }}>×</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{
+                  padding: "2px 9px", borderRadius: 10, fontSize: 11, fontWeight: 600,
+                  background: e.allotType === "Contractual" ? "#eff6ff" : "#f0fdf4",
+                  color:      e.allotType === "Contractual" ? "#1d4ed8" : "#166534",
+                  border: `1px solid ${e.allotType === "Contractual" ? "#bfdbfe" : "#bbf7d0"}`,
+                }}>{e.allotType}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+                  {e.customer} · {e.accNo} · {e.routeLeg}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 12, color: "#6b7280" }}>
+                <span>Units: <b style={{ color: "#111827" }}>{e.unitTypes}</b></span>
+                {e.exclTypes !== "None" && <span>Excl: <b style={{ color: "#111827" }}>{e.exclTypes}</b></span>}
+                <span>Allotments: <b style={{ color: "#111827" }}>{e.allotments}</b></span>
+                <span>Days: <b style={{ color: "#111827" }}>{e.dayTimes.map(({day,time}) => time ? `${day} (${time})` : day).join(", ")}</b></span>
+                {e.validFrom !== "—" && <span>Valid: {e.validFrom} → {e.validTo}</span>}
+                {e.seasonal !== "None" && <span>Seasonal: <b style={{ color: "#111827" }}>{e.seasonal}</b></span>}
+                <span>Vessel: {e.vessel}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+      </div>
+    </div>
+  );
+}
