@@ -1,484 +1,825 @@
-import { useState, useRef, useEffect } from "react";
-
-const CUSTOMER_ACCOUNTS = {
-  "Elsa's company":        ["123456", "987654"],
-  "Nordic Freight AB":     ["100001", "100002"],
-  "Atlantic Cargo Ltd":    ["200001"],
-  "Baltic Transport GmbH": ["300001", "300002", "300003"],
-  "North Sea Logistics":   ["400001", "400002"],
-};
-const CUSTOMERS = Object.keys(CUSTOMER_ACCOUNTS);
-
-const VESSELS = ["Ark Futura", "Ark Germania", "Magnolia Seaways", "Petunia Seaways", "Begonia Seaways", "Optima Seaways", "Primula Seaways", "Any vessel"];
-const ROUTE_GROUPS = [
-  { label: "Gothenburg – Immingham", routes: ["GOTIMM", "IMMGOT"] },
-  { label: "Gothenburg – Ghent",     routes: ["GOTGHE", "GHEGOT"] },
-  { label: "Rosslare – Dunkirk",     routes: ["ROTFXT", "FXTROT"] },
-  { label: "Esbjerg – Immingham",    routes: ["ESBIMM", "IMMEBS"] },
-];
-const ROUTE_OPTIONS = ROUTE_GROUPS.map(g => ({ group: g.label, options: g.routes.map(r => ({ code: r, label: r })) }));
-const UNIT_OPTIONS = [
-  { code: "TRA", label: "TRA — trailer" },
-  { code: "SDR", label: "SDR — self-drive" },
-  { code: "CTR", label: "CTR — container" },
-  { code: "RFR", label: "RFR — reefer container" },
-  { code: "VEH", label: "VEH — vehicle" },
-  { code: "BLK", label: "BLK — bulk" },
-  { code: "LCL", label: "LCL — less than container" },
-];
-const EXCL_OPTIONS = [
-  { code: "TRA", label: "TRA — trailer" },
-  { code: "SDR", label: "SDR — self-drive" },
-  { code: "CTR", label: "CTR — container" },
-  { code: "RFR", label: "RFR — reefer container" },
-  { code: "IMO", label: "IMO — hazardous" },
-  { code: "EMP", label: "EMP — empty" },
-  { code: "OOG", label: "OOG — out of gauge" },
-];
-const SEASONAL_OPTIONS = [
-  { value: "none",                          label: "None" },
-  { value: "01/01 - 31/03",                 label: "01/01 – 31/03 (Q1)" },
-  { value: "01/04 - 30/06",                 label: "01/04 – 30/06 (Q2)" },
-  { value: "01/07 - 30/09",                 label: "01/07 – 30/09 (Q3)" },
-  { value: "01/10 - 31/12",                 label: "01/10 – 31/12 (Q4)" },
-  { value: "01/01 - 31/03, 01/10 - 31/12", label: "Q1 + Q4" },
-  { value: "custom",                        label: "Custom range..." },
-];
-const DAYS_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const HEADERS = ["Account no.","Customer","Allotment type","Valid from","Valid to","Route leg","Vessel","Allotments","Unit types","Excluded unit types","Day","Departure time","Seasonal restrictions"];
-
-const EMPTY_FORM = {
-  customer: "", accNo: "", allotType: "", validFrom: "", validTo: "",
-  routeLegs: [], vessel: "", allotments: "", seasonal: "none", customSeasonal: "",
-  unitTypes: [], exclTypes: [], days: [], times: {},
-};
-
-function MultiSelect({ options, grouped, selected, onChange, placeholder, borderColor }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef();
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
-  const toggle = (code) =>
-    onChange(selected.includes(code) ? selected.filter(c => c !== code) : [...selected, code]);
-
-  const renderOption = (o) => (
-    <div key={o.code} onClick={() => toggle(o.code)} style={{
-      padding: "8px 12px", fontSize: 13, cursor: "pointer",
-      display: "flex", alignItems: "center", gap: 8,
-      background: selected.includes(o.code) ? "#f0fdf4" : "#fff",
-      color: selected.includes(o.code) ? "#166534" : "#111",
-    }}>
-      <span style={{
-        width: 14, height: 14, borderRadius: 3, border: "1px solid", flexShrink: 0,
-        borderColor: selected.includes(o.code) ? "#16a34a" : "#d1d5db",
-        background: selected.includes(o.code) ? "#16a34a" : "#fff",
-        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff",
-      }}>{selected.includes(o.code) ? "✓" : ""}</span>
-      {o.label}
-    </div>
-  );
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button onClick={() => setOpen(o => !o)} style={{
-        width: "100%", minHeight: 36, padding: "0 10px", fontSize: 13,
-        border: `1px solid ${borderColor || "#d1d5db"}`, borderRadius: 6,
-        background: "#fff", cursor: "pointer", textAlign: "left",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        color: selected.length ? "#111" : "#9ca3af",
-      }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selected.length ? selected.join(", ") : placeholder}
-        </span>
-        <span style={{ marginLeft: 6, fontSize: 11, flexShrink: 0 }}>▾</span>
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", zIndex: 100, top: "100%", left: 0, right: 0,
-          background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6,
-          boxShadow: "0 4px 16px rgba(0,0,0,0.10)", marginTop: 2,
-          maxHeight: 240, overflowY: "auto",
-        }}>
-          {grouped
-            ? grouped.map(g => (
-                <div key={g.group}>
-                  <div style={{ padding: "6px 12px 4px", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", background: "#f9fafb", borderBottom: "1px solid #f3f4f6" }}>
-                    {g.group}
-                  </div>
-                  {g.options.map(renderOption)}
-                </div>
-              ))
-            : (options || []).map(renderOption)
-          }
-        </div>
-      )}
-      {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
-          {selected.map(c => (
-            <span key={c} style={{
-              display: "flex", alignItems: "center", gap: 3, padding: "2px 8px",
-              background: "#f0fdf4", border: "1px solid #bbf7d0",
-              borderRadius: 12, fontSize: 11, color: "#166534",
-            }}>
-              {c}
-              <button onClick={() => toggle(c)} style={{ border: "none", background: "none", cursor: "pointer", color: "#4ade80", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Allotment Entry</title>
+<style>
+:root {
+  --bg: #eef2f7;
+  --surface: #ffffff;
+  --surface2: #f5f8fb;
+  --surface3: #e8eef5;
+  --border: #ccd8e4;
+  --border2: #a8bdd0;
+  --dfds-blue: #002f6c;
+  --dfds-accent: #005fa3;
+  --dfds-light: #0077c8;
+  --red: #dc2626;
+  --green: #16a34a;
+  --text: #1a2636;
+  --text2: #3d5a78;
+  --text3: #6b88a4;
+  --radius: 6px;
+  --radius-lg: 10px;
 }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-function Field({ label, required, children, style }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
-      <label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        {label}{required && <span style={{ color: "#ef4444", marginLeft: 2 }}>*</span>}
-      </label>
-      {children}
-    </div>
-  );
+/* HEADER */
+.header {
+  background: linear-gradient(135deg, #002050 0%, #003580 60%, #004aaa 100%);
+  border-bottom: 2px solid var(--dfds-accent);
+  padding: 0 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 62px; position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 2px 12px rgba(0,47,108,0.15);
 }
-function Section({ title, children }) {
-  return (
-    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 18px", marginBottom: 12 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>{title}</div>
-      {children}
-    </div>
-  );
+.logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; color: #fff; }
+.logo span { color: #7dc8f7; }
+.header-badge { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4); color: #fff; font-family: 'Courier New',monospace; font-size: 11px; padding: 3px 10px; border-radius: 20px; letter-spacing: 1px; }
+
+/* MAIN */
+.main { padding: 24px; max-width: 860px; margin: 0 auto; }
+
+/* PAGE TITLE */
+.page-title { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.page-label { font-size: 11px; font-weight: 700; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+.page-title h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+.page-title p { font-size: 13px; color: var(--text3); margin-top: 4px; }
+
+/* SECTION */
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 12px; }
+.section-title { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; font-family: 'Courier New', monospace; }
+
+/* GRID */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+/* FIELD */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+.field label .req { color: var(--red); margin-left: 2px; }
+.field input, .field select {
+  height: 36px; padding: 0 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface2); color: var(--text);
+  font-family: 'Segoe UI', Arial, sans-serif; outline: none; width: 100%;
 }
-function Grid({ cols = 3, children }) {
-  return <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 12 }}>{children}</div>;
+.field input:focus, .field select:focus { border-color: var(--dfds-accent); background: #fff; }
+.field input.err, .field select.err { border-color: #fca5a5; }
+.field .err-msg { font-size: 11px; color: var(--red); }
+.field input[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* YES/NO TOGGLE */
+.yn-wrap { display: flex; gap: 6px; }
+.yn-btn {
+  flex: 1; height: 36px; font-size: 13px; font-weight: 500;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text2);
+  cursor: pointer; transition: all 0.15s; font-family: 'Segoe UI', Arial, sans-serif;
 }
+.yn-btn.active { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.yn-btn.err-border { border-color: #fca5a5; }
 
-const inputStyle  = { height: 36, padding: "0 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 6, background: "#fff", color: "#111", outline: "none", width: "100%" };
-const selectStyle = { ...inputStyle, cursor: "pointer", appearance: "auto" };
-
-function buildCSV(entries) {
-  const escape = (v) => `"${String(v).replace(/"/g, '""')}"`;
-  const rows = entries.flatMap(e =>
-    e.dayTimes.map(({ day, time }) =>
-      [e.accNo, e.customer, e.allotType, e.validFrom, e.validTo, e.routeLeg,
-       e.vessel, e.allotments, e.unitTypes, e.exclTypes, day, time, e.seasonal].map(escape).join(",")
-    )
-  );
-  return [HEADERS.map(escape).join(","), ...rows].join("\n");
+/* DAY PILLS */
+.day-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.day-pill {
+  padding: 5px 13px; font-size: 13px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text2); cursor: pointer; transition: all 0.15s;
+  font-family: 'Segoe UI', Arial, sans-serif;
 }
+.day-pill.active { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.day-pill.err-border { border-color: #fca5a5; }
+.day-pill-all { border-style: dashed; color: var(--text2); font-weight: 600; }
+.day-pill-all.active { background: var(--dfds-accent); border-color: var(--dfds-accent); border-style: solid; color: #fff; }
+.day-pill-divider { width: 1px; background: var(--border); margin: 0 2px; align-self: stretch; }
 
-export default function AllotmentForm() {
-  const [form, setForm]       = useState({ ...EMPTY_FORM });
-  const [entries, setEntries] = useState([]);
-  const [errors, setErrors]   = useState({});
-  const [showCSV, setShowCSV] = useState(false);
-  const [copied, setCopied]   = useState(false);
-  const csvRef = useRef();
+/* TIME SLOTS */
+.time-slots { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.time-day-group { display: flex; align-items: flex-start; gap: 8px; }
+.time-day-group .day-tag { font-size: 12px; font-weight: 600; color: var(--text2); min-width: 32px; padding-top: 7px; font-family: 'Courier New', monospace; }
+.time-day-rows { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.time-row { display: flex; align-items: center; gap: 6px; }
+.time-row input { flex: 1; max-width: 140px; height: 32px; font-size: 13px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); color: var(--text); font-family: 'Segoe UI', Arial, sans-serif; }
+.time-row input:focus { outline: none; border-color: var(--dfds-accent); }
+.time-row-remove { border: none; background: none; cursor: pointer; color: var(--text3); font-size: 16px; line-height: 1; padding: 2px 4px; }
+.time-row-remove:hover { color: var(--red); }
+.time-add-btn { font-size: 12px; color: var(--dfds-accent); cursor: pointer; border: none; background: none; padding: 2px 0; text-align: left; font-family: 'Segoe UI', Arial, sans-serif; font-weight: 500; }
+.time-add-btn:hover { text-decoration: underline; }
+.time-allday-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.time-allday-row input[type=checkbox] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--green); }
+.time-allday-row label { font-size: 12px; color: var(--text2); cursor: pointer; font-family: 'Segoe UI', Arial, sans-serif; }
+.time-allday-tag { font-size: 12px; color: var(--text3); font-style: italic; padding: 6px 0; }
 
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+/* MULTI SELECT */
+.ms-wrap { position: relative; }
+.ms-trigger {
+  width: 100%; min-height: 36px; padding: 0 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface2); color: var(--text3);
+  cursor: pointer; text-align: left; display: flex; align-items: center;
+  justify-content: space-between; font-family: 'Segoe UI', Arial, sans-serif;
+  outline: none;
+}
+.ms-trigger.has-values { color: var(--text); }
+.ms-trigger.err { border-color: #fca5a5; }
+.ms-trigger:focus { border-color: var(--dfds-accent); }
+.ms-arrow { font-size: 11px; flex-shrink: 0; margin-left: 6px; color: var(--text3); }
+.ms-dropdown {
+  position: absolute; z-index: 50; top: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid var(--border2); border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10); margin-top: 2px;
+  max-height: 240px; overflow-y: auto; display: none;
+}
+.ms-dropdown.open { display: block; }
+.ms-group-label {
+  padding: 6px 12px 4px; font-size: 10px; font-weight: 700;
+  color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-family: 'Courier New', monospace;
+}
+.ms-option {
+  padding: 8px 12px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; color: var(--text);
+}
+.ms-option:hover { background: var(--surface2); }
+.ms-option.selected { background: #f0fdf4; color: #166534; }
+.ms-checkbox {
+  width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border2);
+  background: #fff; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 9px; color: #fff;
+}
+.ms-option.selected .ms-checkbox { background: var(--green); border-color: var(--green); }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ms-chip {
+  display: flex; align-items: center; gap: 3px; padding: 2px 8px;
+  background: #f0fdf4; border: 1px solid #bbf7d0;
+  border-radius: 12px; font-size: 11px; color: #166534;
+  font-family: 'Courier New', monospace;
+}
+.ms-chip button { border: none; background: none; cursor: pointer; color: #4ade80; font-size: 14px; line-height: 1; padding: 0; }
 
-  const handleCustomerChange = (customer) => {
-    setForm(f => ({ ...f, customer, accNo: "" }));
-  };
+/* BUTTONS */
+.btn { padding: 9px 18px; border-radius: var(--radius); font-size: 13px; font-weight: 600; font-family: 'Segoe UI',Arial,sans-serif; cursor: pointer; border: none; transition: all 0.15s; }
+.btn-primary { background: var(--dfds-accent); color: #fff; }
+.btn-primary:hover { background: var(--dfds-light); }
+.btn-secondary { background: var(--surface2); border: 1px solid var(--border2); color: var(--text2); }
+.btn-secondary:hover { border-color: var(--dfds-accent); color: var(--dfds-accent); }
+.action-row { display: flex; gap: 8px; margin-bottom: 24px; }
 
-  const availableAccounts = form.customer ? CUSTOMER_ACCOUNTS[form.customer] || [] : [];
+/* ENTRIES */
+.entries-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.entries-label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'Courier New', monospace; }
+.entry-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; position: relative; }
+.entry-card:hover { border-color: var(--border2); }
+.entry-remove { position: absolute; top: 10px; right: 12px; border: none; background: none; cursor: pointer; color: var(--text3); font-size: 18px; line-height: 1; padding: 0; }
+.entry-remove:hover { color: var(--red); }
+.entry-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; font-family: 'Courier New',monospace; }
+.badge-contractual { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+.badge-noncontractual { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.entry-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.entry-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text3); }
+.entry-meta b { color: var(--text); }
 
-  const validate = () => {
-    const e = {};
-    if (!form.customer)              e.customer  = "Required";
-    if (!form.accNo)                 e.accNo     = "Required";
-    if (!form.allotType)             e.allotType = "Required";
-    if (form.routeLegs.length === 0) e.routeLegs = "Select at least one";
-    if (!form.allotments || isNaN(form.allotments)) e.allotments = "Required";
-    if (form.unitTypes.length === 0) e.unitTypes = "Select at least one";
-    if (form.days.length === 0)      e.days      = "Select at least one day";
-    if (!form.validFrom) e.validFrom = "Required";
-    if (!form.validTo)   e.validTo   = "Required";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+/* EMPTY STATE */
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius); }
 
-  const toggleDay = (day) => {
-    const next = form.days.includes(day) ? form.days.filter(d => d !== day) : [...form.days, day];
-    set("days", next);
-  };
+/* CSV PANEL */
+.csv-panel { margin-bottom: 14px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.csv-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); }
+.csv-hint { font-size: 12px; color: var(--text3); }
+.csv-panel textarea { width: 100%; min-height: 140px; padding: 10px 12px; font-size: 11px; font-family: 'Courier New', monospace; border: none; resize: vertical; background: #fff; color: var(--text); outline: none; display: block; }
+.btn-copy { padding: 4px 12px; font-size: 12px; font-weight: 500; border-radius: var(--radius); border: 1px solid var(--border2); background: #fff; color: var(--text2); cursor: pointer; font-family: 'Segoe UI',Arial,sans-serif; transition: all 0.2s; }
+.btn-copy.copied { background: var(--green); border-color: var(--green); color: #fff; }
 
-  const addEntry = () => {
-    if (!validate()) return;
-    const sortedDays = [...form.days].sort((a, b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
-    const dayTimes   = sortedDays.map(d => ({ day: d, time: form.times[d] || "" }));
-    const seasonal   = form.seasonal === "custom" ? form.customSeasonal : form.seasonal === "none" ? "None" : form.seasonal;
-    setEntries(prev => [...prev, {
-      customer: form.customer, accNo: form.accNo, allotType: form.allotType,
-      validFrom: form.validFrom || "—", validTo: form.validTo || "—",
-      routeLeg: form.routeLegs.join(", "), vessel: form.vessel || "Any",
-      allotments: form.allotments,
-      unitTypes: form.unitTypes.join(", "),
-      exclTypes: form.exclTypes.length ? form.exclTypes.join(", ") : "None",
-      dayTimes, seasonal,
-    }]);
-    setForm({ ...EMPTY_FORM });
-    setErrors({});
-    setShowCSV(false);
-  };
+/* TOAST */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: #fff; padding: 10px 18px; border-radius: var(--radius); font-size: 13px; opacity: 0; transform: translateY(8px); transition: all 0.2s; pointer-events: none; z-index: 999; }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.error { background: var(--red); }
+</style>
+</head>
+<body>
 
-  const removeEntry = (i) => setEntries(prev => prev.filter((_, idx) => idx !== i));
+<div class="header">
+  <div class="logo">DFDS <span>Allotments</span></div>
+  <div class="header-badge">FREIGHT · REVENUE OPS</div>
+</div>
 
-  const handleCopy = () => {
-    if (csvRef.current) {
-      csvRef.current.select();
-      document.execCommand("copy");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
+<div class="main">
+  <div class="page-title">
+    <div class="page-label">Freight allotments</div>
+    <h1>New allotment entry</h1>
+    <p>Complete all required fields. Use multi-select fields to assign multiple values.</p>
+  </div>
 
-  const sortedSelDays = [...form.days].sort((a, b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
-  const csvText       = entries.length > 0 ? buildCSV(entries) : "";
-
-  return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#f9fafb", minHeight: "100vh", padding: "24px 20px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-
-        <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Freight allotments</div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: "#111827", margin: 0 }}>New allotment entry</h1>
-          <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Complete all required fields. Use multi-select fields to assign multiple values.</p>
+  <!-- ACCOUNT -->
+  <div class="section">
+    <div class="section-title">Account</div>
+    <div class="grid-3">
+      <div class="field">
+        <label>Customer <span class="req">*</span></label>
+        <select id="f-customer" onchange="onCustomerChange()">
+          <option value="">Select customer...</option>
+          <option>Elsa's company</option>
+          <option>Nordic Freight AB</option>
+          <option>Atlantic Cargo Ltd</option>
+          <option>Baltic Transport GmbH</option>
+          <option>North Sea Logistics</option>
+        </select>
+        <span class="err-msg" id="e-customer"></span>
+      </div>
+      <div class="field">
+        <label>Account no. <span class="req">*</span></label>
+        <select id="f-accno" disabled>
+          <option value="">Select customer first</option>
+        </select>
+        <span class="err-msg" id="e-accno"></span>
+      </div>
+      <div class="field">
+        <label>Contractual allotment <span class="req">*</span></label>
+        <div class="yn-wrap">
+          <button class="yn-btn" id="yn-yes" onclick="setAllotType('Contractual')">Yes</button>
+          <button class="yn-btn" id="yn-no" onclick="setAllotType('Non-contractual')">No</button>
         </div>
-
-        {/* Account */}
-        <Section title="Account">
-          <Grid cols={3}>
-            <Field label="Customer" required>
-              <select style={{ ...selectStyle, borderColor: errors.customer ? "#fca5a5" : "#d1d5db" }}
-                value={form.customer} onChange={e => handleCustomerChange(e.target.value)}>
-                <option value="">Select customer...</option>
-                {CUSTOMERS.map(c => <option key={c}>{c}</option>)}
-              </select>
-              {errors.customer && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.customer}</span>}
-            </Field>
-            <Field label="Account no." required>
-              <select style={{ ...selectStyle, opacity: !form.customer ? 0.5 : 1, borderColor: errors.accNo ? "#fca5a5" : "#d1d5db" }}
-                value={form.accNo} onChange={e => set("accNo", e.target.value)} disabled={!form.customer}>
-                <option value="">{form.customer ? "Select account..." : "Select customer first"}</option>
-                {availableAccounts.map(a => <option key={a}>{a}</option>)}
-              </select>
-              {errors.accNo && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.accNo}</span>}
-            </Field>
-            <Field label="Contractual allotment" required>
-              <div style={{ display: "flex", gap: 6 }}>
-                {["Yes", "No"].map(opt => {
-                  const val = opt === "Yes" ? "Contractual" : "Non-contractual";
-                  const active = form.allotType === val;
-                  return (
-                    <button key={opt} onClick={() => set("allotType", val)} style={{
-                      flex: 1, height: 36, fontSize: 13, fontWeight: active ? 600 : 400,
-                      borderRadius: 6, border: `1px solid ${errors.allotType ? "#fca5a5" : active ? "#16a34a" : "#d1d5db"}`,
-                      background: active ? "#16a34a" : "#fff",
-                      color: active ? "#fff" : "#374151", cursor: "pointer", transition: "all 0.15s",
-                    }}>{opt}</button>
-                  );
-                })}
-              </div>
-              {errors.allotType && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.allotType}</span>}
-            </Field>
-          </Grid>
-        </Section>
-
-        {/* Validity */}
-        <Section title="Validity">
-          <Grid cols={3}>
-            <Field label="Valid from" required={form.allotType === "Contractual"}>
-              <input type="date"
-                style={{ ...inputStyle, borderColor: errors.validFrom ? "#fca5a5" : "#d1d5db" }}
-                value={form.validFrom} onChange={e => set("validFrom", e.target.value)} />
-              {errors.validFrom && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.validFrom}</span>}
-            </Field>
-            <Field label="Valid to" required={form.allotType === "Contractual"}>
-              <input type="date"
-                style={{ ...inputStyle, borderColor: errors.validTo ? "#fca5a5" : "#d1d5db" }}
-                value={form.validTo} onChange={e => set("validTo", e.target.value)} />
-              {errors.validTo && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.validTo}</span>}
-            </Field>
-            <Field label="Seasonal restriction">
-              <select style={selectStyle} value={form.seasonal} onChange={e => set("seasonal", e.target.value)}>
-                {SEASONAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </Field>
-          </Grid>
-          {form.seasonal === "custom" && (
-            <div style={{ marginTop: 10 }}>
-              <Field label="Custom range (e.g. 15/03 – 15/09)">
-                <input style={inputStyle} value={form.customSeasonal} onChange={e => set("customSeasonal", e.target.value)} placeholder="dd/mm - dd/mm" />
-              </Field>
-            </div>
-          )}
-        </Section>
-
-        {/* Route & Capacity */}
-        <Section title="Route & capacity">
-          <Grid cols={3}>
-            <Field label="Route leg" required>
-              <MultiSelect grouped={ROUTE_OPTIONS} selected={form.routeLegs}
-                onChange={v => set("routeLegs", v)} placeholder="Select route legs..."
-                borderColor={errors.routeLegs ? "#fca5a5" : undefined} />
-              {errors.routeLegs && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.routeLegs}</span>}
-            </Field>
-            <Field label="Vessel">
-              <select style={selectStyle} value={form.vessel} onChange={e => set("vessel", e.target.value)}>
-                <option value="">Any vessel</option>
-                {VESSELS.map(v => <option key={v}>{v}</option>)}
-              </select>
-            </Field>
-            <Field label="Allotments (units)" required>
-              <input type="number" min={1} max={999}
-                style={{ ...inputStyle, borderColor: errors.allotments ? "#fca5a5" : "#d1d5db" }}
-                value={form.allotments} onChange={e => set("allotments", e.target.value)} placeholder="e.g. 12" />
-              {errors.allotments && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.allotments}</span>}
-            </Field>
-          </Grid>
-        </Section>
-
-        {/* Unit Types */}
-        <Section title="Unit types">
-          <Grid cols={2}>
-            <Field label="Included unit types" required>
-              <MultiSelect options={UNIT_OPTIONS} selected={form.unitTypes}
-                onChange={v => set("unitTypes", v)} placeholder="Select unit types..."
-                borderColor={errors.unitTypes ? "#fca5a5" : undefined} />
-              {errors.unitTypes && <span style={{ fontSize: 11, color: "#ef4444" }}>{errors.unitTypes}</span>}
-            </Field>
-            <Field label="Excluded unit types">
-              <MultiSelect options={EXCL_OPTIONS} selected={form.exclTypes}
-                onChange={v => set("exclTypes", v)} placeholder="None / select to exclude..." />
-            </Field>
-          </Grid>
-        </Section>
-
-        {/* Days & Times */}
-        <Section title="Valid on days & departure times">
-          <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Days<span style={{ color: "#ef4444" }}>*</span>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: errors.days ? 4 : 14 }}>
-            {DAYS_ORDER.map(d => (
-              <button key={d} onClick={() => toggleDay(d)} style={{
-                padding: "5px 13px", fontSize: 13, borderRadius: 20, border: "1px solid", cursor: "pointer", transition: "all 0.15s",
-                borderColor: form.days.includes(d) ? "#16a34a" : "#d1d5db",
-                background:  form.days.includes(d) ? "#16a34a" : "#fff",
-                color:       form.days.includes(d) ? "#fff"    : "#374151",
-                fontWeight:  form.days.includes(d) ? 600 : 400,
-              }}>{d}</button>
-            ))}
-          </div>
-          {errors.days && <div style={{ fontSize: 11, color: "#ef4444", marginBottom: 10 }}>{errors.days}</div>}
-          {sortedSelDays.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                Departure time per day <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional — leave blank for all sailings)</span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-                {sortedSelDays.map(d => (
-                  <div key={d} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", minWidth: 32 }}>{d}</span>
-                    <input type="time"
-                      style={{ ...inputStyle, flex: 1, height: 32, fontSize: 13 }}
-                      value={form.times[d] || ""}
-                      onChange={e => set("times", { ...form.times, [d]: e.target.value })} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Section>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-          <button onClick={() => { setForm({ ...EMPTY_FORM }); setErrors({}); }} style={{
-            padding: "9px 20px", fontSize: 13, fontWeight: 500, borderRadius: 7,
-            border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer",
-          }}>Clear form</button>
-          <button onClick={addEntry} style={{
-            padding: "9px 22px", fontSize: 13, fontWeight: 600, borderRadius: 7,
-            border: "1px solid #16a34a", background: "#16a34a", color: "#fff", cursor: "pointer",
-          }}>Add entry ↗</button>
-        </div>
-
-        {/* Entries */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Entries ({entries.length})
-            </span>
-            {entries.length > 0 && (
-              <button onClick={() => setShowCSV(v => !v)} style={{
-                padding: "5px 14px", fontSize: 12, fontWeight: 500, borderRadius: 6,
-                border: "1px solid #d1d5db", background: showCSV ? "#f3f4f6" : "#fff", color: "#374151", cursor: "pointer",
-              }}>{showCSV ? "Hide CSV" : "Export CSV ↓"}</button>
-            )}
-          </div>
-
-          {/* CSV panel */}
-          {showCSV && entries.length > 0 && (
-            <div style={{ marginBottom: 14, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                <span style={{ fontSize: 12, color: "#6b7280" }}>Copy and paste into Excel, or save as a .csv file</span>
-                <button onClick={handleCopy} style={{
-                  padding: "4px 12px", fontSize: 12, fontWeight: 500, borderRadius: 5,
-                  border: "1px solid #d1d5db", background: copied ? "#16a34a" : "#fff",
-                  color: copied ? "#fff" : "#374151", cursor: "pointer", transition: "all 0.2s",
-                }}>
-                  {copied ? "Copied!" : "Copy all"}
-                </button>
-              </div>
-              <textarea
-                ref={csvRef}
-                readOnly
-                value={csvText}
-                style={{
-                  width: "100%", minHeight: 140, padding: "10px 12px", fontSize: 11,
-                  fontFamily: "monospace", border: "none", resize: "vertical",
-                  background: "#fff", color: "#374151", outline: "none", display: "block",
-                }}
-              />
-            </div>
-          )}
-
-          {entries.length === 0 ? (
-            <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: "28px 16px", border: "1px dashed #e5e7eb", borderRadius: 8 }}>
-              No entries added yet
-            </div>
-          ) : entries.map((e, i) => (
-            <div key={i} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px", marginBottom: 8, position: "relative" }}>
-              <button onClick={() => removeEntry(i)} style={{ position: "absolute", top: 10, right: 12, border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: 16, lineHeight: 1 }}>×</button>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <span style={{
-                  padding: "2px 9px", borderRadius: 10, fontSize: 11, fontWeight: 600,
-                  background: e.allotType === "Contractual" ? "#eff6ff" : "#f0fdf4",
-                  color:      e.allotType === "Contractual" ? "#1d4ed8" : "#166534",
-                  border: `1px solid ${e.allotType === "Contractual" ? "#bfdbfe" : "#bbf7d0"}`,
-                }}>{e.allotType}</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
-                  {e.customer} · {e.accNo} · {e.routeLeg}
-                </span>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 12, color: "#6b7280" }}>
-                <span>Units: <b style={{ color: "#111827" }}>{e.unitTypes}</b></span>
-                {e.exclTypes !== "None" && <span>Excl: <b style={{ color: "#111827" }}>{e.exclTypes}</b></span>}
-                <span>Allotments: <b style={{ color: "#111827" }}>{e.allotments}</b></span>
-                <span>Days: <b style={{ color: "#111827" }}>{e.dayTimes.map(({day,time}) => time ? `${day} (${time})` : day).join(", ")}</b></span>
-                {e.validFrom !== "—" && <span>Valid: {e.validFrom} → {e.validTo}</span>}
-                {e.seasonal !== "None" && <span>Seasonal: <b style={{ color: "#111827" }}>{e.seasonal}</b></span>}
-                <span>Vessel: {e.vessel}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
+        <span class="err-msg" id="e-allottype"></span>
       </div>
     </div>
-  );
+  </div>
+
+  <!-- VALIDITY -->
+  <div class="section">
+    <div class="section-title">Validity</div>
+    <div class="grid-3">
+      <div class="field">
+        <label>Valid from <span class="req">*</span></label>
+        <input type="date" id="f-valid-from">
+        <span class="err-msg" id="e-valid-from"></span>
+      </div>
+      <div class="field">
+        <label>Valid to <span class="req">*</span></label>
+        <input type="date" id="f-valid-to">
+        <span class="err-msg" id="e-valid-to"></span>
+      </div>
+      <div class="field">
+        <label>Seasonal restriction</label>
+        <select id="f-seasonal" onchange="onSeasonalChange()">
+          <option value="none">None</option>
+          <option value="01/01 - 31/03">01/01 – 31/03 (Q1)</option>
+          <option value="01/04 - 30/06">01/04 – 30/06 (Q2)</option>
+          <option value="01/07 - 30/09">01/07 – 30/09 (Q3)</option>
+          <option value="01/10 - 31/12">01/10 – 31/12 (Q4)</option>
+          <option value="01/01 - 31/03, 01/10 - 31/12">Q1 + Q4</option>
+          <option value="custom">Custom range...</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="custom-seasonal-wrap" style="display:none;margin-top:12px">
+      <label>Custom range (e.g. 15/03 – 15/09)</label>
+      <input type="text" id="f-custom-seasonal" placeholder="dd/mm - dd/mm">
+    </div>
+  </div>
+
+  <!-- ROUTE & CAPACITY -->
+  <div class="section">
+    <div class="section-title">Route & capacity</div>
+    <div class="grid-3">
+      <div class="field">
+        <label>Route leg <span class="req">*</span></label>
+        <div class="ms-wrap" id="ms-route">
+          <button class="ms-trigger" id="ms-route-trigger" onclick="toggleMs('route')" type="button">
+            <span id="ms-route-label">Select route legs...</span>
+            <span class="ms-arrow">▾</span>
+          </button>
+          <div class="ms-dropdown" id="ms-route-dropdown">
+            <div class="ms-group-label">Gothenburg – Immingham</div>
+            <div class="ms-option" onclick="toggleMsOption('route','GOTIMM')"><span class="ms-checkbox"></span>GOTIMM</div>
+            <div class="ms-option" onclick="toggleMsOption('route','IMMGOT')"><span class="ms-checkbox"></span>IMMGOT</div>
+            <div class="ms-group-label">Gothenburg – Ghent</div>
+            <div class="ms-option" onclick="toggleMsOption('route','GOTGHE')"><span class="ms-checkbox"></span>GOTGHE</div>
+            <div class="ms-option" onclick="toggleMsOption('route','GHEGOT')"><span class="ms-checkbox"></span>GHEGOT</div>
+            <div class="ms-group-label">Rosslare – Dunkirk</div>
+            <div class="ms-option" onclick="toggleMsOption('route','ROTFXT')"><span class="ms-checkbox"></span>ROTFXT</div>
+            <div class="ms-option" onclick="toggleMsOption('route','FXTROT')"><span class="ms-checkbox"></span>FXTROT</div>
+            <div class="ms-group-label">Esbjerg – Immingham</div>
+            <div class="ms-option" onclick="toggleMsOption('route','ESBIMM')"><span class="ms-checkbox"></span>ESBIMM</div>
+            <div class="ms-option" onclick="toggleMsOption('route','IMMEBS')"><span class="ms-checkbox"></span>IMMEBS</div>
+          </div>
+        </div>
+        <div class="ms-chips" id="ms-route-chips"></div>
+        <span class="err-msg" id="e-route"></span>
+      </div>
+      <div class="field">
+        <label>Vessel</label>
+        <select id="f-vessel">
+          <option value="">Any vessel</option>
+          <option>Ark Futura</option>
+          <option>Ark Germania</option>
+          <option>Magnolia Seaways</option>
+          <option>Petunia Seaways</option>
+          <option>Begonia Seaways</option>
+          <option>Optima Seaways</option>
+          <option>Primula Seaways</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Allotments (units) <span class="req">*</span></label>
+        <input type="number" id="f-allotments" min="1" max="999" placeholder="e.g. 12">
+        <span class="err-msg" id="e-allotments"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- UNIT TYPES -->
+  <div class="section">
+    <div class="section-title">Unit types</div>
+    <div class="grid-2">
+      <div class="field">
+        <label>Included unit types <span class="req">*</span></label>
+        <div class="ms-wrap" id="ms-unit">
+          <button class="ms-trigger" id="ms-unit-trigger" onclick="toggleMs('unit')" type="button">
+            <span id="ms-unit-label">Select unit types...</span>
+            <span class="ms-arrow">▾</span>
+          </button>
+          <div class="ms-dropdown" id="ms-unit-dropdown">
+            <div class="ms-option" onclick="toggleMsOption('unit','TRA')"><span class="ms-checkbox"></span>TRA — trailer</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','SDR')"><span class="ms-checkbox"></span>SDR — self-drive</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','CTR')"><span class="ms-checkbox"></span>CTR — container</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','RFR')"><span class="ms-checkbox"></span>RFR — reefer container</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','VEH')"><span class="ms-checkbox"></span>VEH — vehicle</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','BLK')"><span class="ms-checkbox"></span>BLK — bulk</div>
+            <div class="ms-option" onclick="toggleMsOption('unit','LCL')"><span class="ms-checkbox"></span>LCL — less than container</div>
+          </div>
+        </div>
+        <div class="ms-chips" id="ms-unit-chips"></div>
+        <span class="err-msg" id="e-unit"></span>
+      </div>
+      <div class="field">
+        <label>Excluded unit types</label>
+        <div class="ms-wrap" id="ms-excl">
+          <button class="ms-trigger" id="ms-excl-trigger" onclick="toggleMs('excl')" type="button">
+            <span id="ms-excl-label">None / select to exclude...</span>
+            <span class="ms-arrow">▾</span>
+          </button>
+          <div class="ms-dropdown" id="ms-excl-dropdown">
+            <div class="ms-option" onclick="toggleMsOption('excl','TRA')"><span class="ms-checkbox"></span>TRA — trailer</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','SDR')"><span class="ms-checkbox"></span>SDR — self-drive</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','CTR')"><span class="ms-checkbox"></span>CTR — container</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','RFR')"><span class="ms-checkbox"></span>RFR — reefer container</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','IMO')"><span class="ms-checkbox"></span>IMO — hazardous</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','EMP')"><span class="ms-checkbox"></span>EMP — empty</div>
+            <div class="ms-option" onclick="toggleMsOption('excl','OOG')"><span class="ms-checkbox"></span>OOG — out of gauge</div>
+          </div>
+        </div>
+        <div class="ms-chips" id="ms-excl-chips"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DAYS & TIMES -->
+  <div class="section">
+    <div class="section-title">Valid on days & departure times</div>
+    <div class="field" style="margin-bottom:0">
+      <label>Days <span class="req">*</span></label>
+    </div>
+    <div class="day-pills" id="day-pills" style="margin-top:6px">
+      <button class="day-pill day-pill-all" id="day-pill-all" onclick="toggleAllDays()">All</button>
+      <span class="day-pill-divider"></span>
+      <button class="day-pill" onclick="toggleDay('Mon')">Mon</button>
+      <button class="day-pill" onclick="toggleDay('Tue')">Tue</button>
+      <button class="day-pill" onclick="toggleDay('Wed')">Wed</button>
+      <button class="day-pill" onclick="toggleDay('Thu')">Thu</button>
+      <button class="day-pill" onclick="toggleDay('Fri')">Fri</button>
+      <button class="day-pill" onclick="toggleDay('Sat')">Sat</button>
+      <button class="day-pill" onclick="toggleDay('Sun')">Sun</button>
+    </div>
+    <span class="err-msg" id="e-days"></span>
+    <div id="time-slots-wrap" style="display:none">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;margin-top:14px">
+        Departure time per day <span style="font-weight:400;color:var(--text3)">(optional)</span>
+      </div>
+      <div class="time-slots" id="time-slots"></div>
+    </div>
+  </div>
+
+  <!-- ACTIONS -->
+  <div class="action-row">
+    <button class="btn btn-secondary" onclick="clearForm()">Clear form</button>
+    <button class="btn btn-primary" onclick="addEntry()">Add entry ↗</button>
+  </div>
+
+  <!-- ENTRIES -->
+  <div class="entries-header">
+    <span class="entries-label" id="entries-label">Entries (0)</span>
+    <button class="btn btn-secondary" id="csv-toggle-btn" style="display:none;padding:5px 14px;font-size:12px" onclick="toggleCSV()">Export CSV ↓</button>
+  </div>
+
+  <div id="csv-panel" class="csv-panel" style="display:none">
+    <div class="csv-header">
+      <span class="csv-hint">Copy and paste into Excel, or save as a .csv file</span>
+      <button class="btn-copy" id="copy-btn" onclick="copyCSV()">Copy all</button>
+    </div>
+    <textarea id="csv-text" readonly></textarea>
+  </div>
+
+  <div id="entries-list">
+    <div class="empty-state">No entries added yet</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────────────
+const CUSTOMER_ACCOUNTS = {
+  "Elsa's company":        ['123456', '987654'],
+  'Nordic Freight AB':     ['100001', '100002'],
+  'Atlantic Cargo Ltd':    ['200001'],
+  'Baltic Transport GmbH': ['300001', '300002', '300003'],
+  'North Sea Logistics':   ['400001', '400002'],
+};
+
+const DAYS_ORDER = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const CSV_HEADERS = ['Account no.','Customer','Allotment type','Valid from','Valid to','Route leg','Vessel','Allotments','Unit types','Excluded unit types','Day','Departure time','Seasonal restrictions'];
+
+// ── STATE ─────────────────────────────────────────────────────────────────
+let allotType = '';
+let selectedDays = [];
+let dayTimes = {};
+let msState = { route: [], unit: [], excl: [] };
+let entries = [];
+let showCSV = false;
+
+// ── CUSTOMER / ACCOUNT ────────────────────────────────────────────────────
+function onCustomerChange() {
+  const customer = document.getElementById('f-customer').value;
+  const accEl = document.getElementById('f-accno');
+  accEl.innerHTML = '<option value="">Select account...</option>';
+  if (customer && CUSTOMER_ACCOUNTS[customer]) {
+    CUSTOMER_ACCOUNTS[customer].forEach(a => {
+      const o = document.createElement('option');
+      o.value = o.textContent = a;
+      accEl.appendChild(o);
+    });
+    accEl.disabled = false;
+  } else {
+    accEl.innerHTML = '<option value="">Select customer first</option>';
+    accEl.disabled = true;
+  }
 }
+
+// ── ALLOTMENT TYPE ────────────────────────────────────────────────────────
+function setAllotType(val) {
+  allotType = val;
+  document.getElementById('yn-yes').classList.toggle('active', val === 'Contractual');
+  document.getElementById('yn-no').classList.toggle('active',  val === 'Non-contractual');
+  document.getElementById('yn-yes').classList.remove('err-border');
+  document.getElementById('yn-no').classList.remove('err-border');
+  document.getElementById('e-allottype').textContent = '';
+}
+
+// ── SEASONAL ──────────────────────────────────────────────────────────────
+function onSeasonalChange() {
+  const val = document.getElementById('f-seasonal').value;
+  document.getElementById('custom-seasonal-wrap').style.display = val === 'custom' ? 'block' : 'none';
+}
+
+// ── MULTI SELECT ──────────────────────────────────────────────────────────
+function toggleMs(key) {
+  const dd = document.getElementById('ms-' + key + '-dropdown');
+  const isOpen = dd.classList.contains('open');
+  // close all first
+  document.querySelectorAll('.ms-dropdown').forEach(d => d.classList.remove('open'));
+  if (!isOpen) dd.classList.add('open');
+}
+
+function toggleMsOption(key, val) {
+  const arr = msState[key];
+  const idx = arr.indexOf(val);
+  if (idx > -1) arr.splice(idx, 1);
+  else arr.push(val);
+  renderMs(key);
+}
+
+function removeChip(key, val) {
+  const arr = msState[key];
+  const idx = arr.indexOf(val);
+  if (idx > -1) arr.splice(idx, 1);
+  renderMs(key);
+}
+
+function renderMs(key) {
+  const arr = msState[key];
+  const trigger = document.getElementById('ms-' + key + '-trigger');
+  const label   = document.getElementById('ms-' + key + '-label');
+  const chips   = document.getElementById('ms-' + key + '-chips');
+  const dd      = document.getElementById('ms-' + key + '-dropdown');
+  const placeholder = key === 'unit' ? 'Select unit types...' : key === 'route' ? 'Select route legs...' : 'None / select to exclude...';
+
+  label.textContent = arr.length ? arr.join(', ') : placeholder;
+  trigger.classList.toggle('has-values', arr.length > 0);
+
+  // update option selected states
+  dd.querySelectorAll('.ms-option').forEach(opt => {
+    const code = opt.querySelector('.ms-checkbox').nextSibling
+      ? opt.textContent.trim().split(' ')[0]
+      : opt.textContent.trim();
+    const isSelected = arr.includes(code.split('\n')[0].trim());
+    opt.classList.toggle('selected', isSelected);
+    opt.querySelector('.ms-checkbox').textContent = isSelected ? '✓' : '';
+  });
+
+  chips.innerHTML = arr.map(c =>
+    `<span class="ms-chip">${c}<button onclick="removeChip('${key}','${c}')" type="button">×</button></span>`
+  ).join('');
+}
+
+// close dropdowns on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ms-wrap')) {
+    document.querySelectorAll('.ms-dropdown').forEach(d => d.classList.remove('open'));
+  }
+});
+
+// ── DAYS & TIMES ──────────────────────────────────────────────────────────
+function toggleDay(day) {
+  const idx = selectedDays.indexOf(day);
+  if (idx > -1) {
+    selectedDays.splice(idx, 1);
+    delete dayTimes[day];
+  } else {
+    selectedDays.push(day);
+    dayTimes[day] = 'ALL';
+  }
+  renderDays();
+}
+
+function toggleAllDays() {
+  if (selectedDays.length === DAYS_ORDER.length) {
+    selectedDays = [];
+    dayTimes = {};
+  } else {
+    selectedDays = [...DAYS_ORDER];
+    DAYS_ORDER.forEach(d => { if (!dayTimes[d]) dayTimes[d] = 'ALL'; });
+  }
+  renderDays();
+}
+
+function addTimeRow(day) {
+  dayTimes[day].push('');
+  renderDays();
+}
+
+function removeTimeRow(day, idx) {
+  dayTimes[day].splice(idx, 1);
+  if (dayTimes[day].length === 0) dayTimes[day].push('');
+  renderDays();
+}
+
+function updateTimeRow(day, idx, val) {
+  dayTimes[day][idx] = val;
+}
+
+function toggleAllTimes(day, checked) {
+  dayTimes[day] = checked ? 'ALL' : [''];
+  renderDays();
+}
+
+function renderDays() {
+  document.querySelectorAll('.day-pill').forEach(pill => {
+    if (pill.id === 'day-pill-all') return;
+    pill.classList.toggle('active', selectedDays.includes(pill.textContent.trim()));
+    pill.classList.remove('err-border');
+  });
+  const allPill = document.getElementById('day-pill-all');
+  allPill.classList.toggle('active', selectedDays.length === DAYS_ORDER.length);
+  allPill.classList.remove('err-border');
+  document.getElementById('e-days').textContent = '';
+
+  const sorted = [...selectedDays].sort((a,b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
+  const wrap = document.getElementById('time-slots-wrap');
+  const slots = document.getElementById('time-slots');
+
+  if (sorted.length === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  slots.innerHTML = sorted.map(d => {
+    const val = dayTimes[d] || [''];
+    const isAllDay = val === 'ALL';
+    const checkboxRow = `
+      <div class="time-allday-row">
+        <input type="checkbox" id="allday-${d}" ${isAllDay ? 'checked' : ''} onchange="toggleAllTimes('${d}', this.checked)">
+        <label for="allday-${d}">All times (00:00–23:59)</label>
+      </div>
+    `;
+    let body;
+    if (isAllDay) {
+      body = `<div class="time-allday-tag">No specific departure — runs all day</div>`;
+    } else {
+      const times = Array.isArray(val) ? val : [''];
+      const rows = times.map((t, idx) => `
+        <div class="time-row">
+          <input type="time" value="${t}" onchange="updateTimeRow('${d}',${idx},this.value)" placeholder="optional">
+          ${times.length > 1 ? `<button class="time-row-remove" onclick="removeTimeRow('${d}',${idx})" type="button" title="Remove">×</button>` : ''}
+        </div>
+      `).join('');
+      body = rows + `<button class="time-add-btn" onclick="addTimeRow('${d}')" type="button">+ Add another time</button>`;
+    }
+    return `
+      <div class="time-day-group">
+        <span class="day-tag">${d}</span>
+        <div class="time-day-rows">
+          ${checkboxRow}
+          ${body}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── VALIDATION ────────────────────────────────────────────────────────────
+function validate() {
+  let ok = true;
+  const setErr = (id, msg) => { document.getElementById(id).textContent = msg; ok = false; };
+  const clearErr = id => document.getElementById(id).textContent = '';
+
+  const customer = document.getElementById('f-customer').value;
+  const accNo    = document.getElementById('f-accno').value;
+  const validFrom = document.getElementById('f-valid-from').value;
+  const validTo   = document.getElementById('f-valid-to').value;
+  const allotments = document.getElementById('f-allotments').value;
+
+  customer  ? clearErr('e-customer')   : setErr('e-customer',   'Required');
+  accNo     ? clearErr('e-accno')      : setErr('e-accno',      'Required');
+  validFrom ? clearErr('e-valid-from') : setErr('e-valid-from', 'Required');
+  validTo   ? clearErr('e-valid-to')   : setErr('e-valid-to',   'Required');
+  allotments && !isNaN(allotments) ? clearErr('e-allotments') : setErr('e-allotments', 'Required');
+
+  if (!allotType) {
+    document.getElementById('e-allottype').textContent = 'Required';
+    document.getElementById('yn-yes').classList.add('err-border');
+    document.getElementById('yn-no').classList.add('err-border');
+    ok = false;
+  }
+
+  if (msState.route.length === 0) { setErr('e-route', 'Select at least one'); document.getElementById('ms-route-trigger').classList.add('err'); }
+  else { clearErr('e-route'); document.getElementById('ms-route-trigger').classList.remove('err'); }
+
+  if (msState.unit.length === 0) { setErr('e-unit', 'Select at least one'); document.getElementById('ms-unit-trigger').classList.add('err'); }
+  else { clearErr('e-unit'); document.getElementById('ms-unit-trigger').classList.remove('err'); }
+
+  if (selectedDays.length === 0) {
+    document.getElementById('e-days').textContent = 'Select at least one day';
+    document.querySelectorAll('.day-pill').forEach(p => p.classList.add('err-border'));
+    ok = false;
+  }
+
+  return ok;
+}
+
+// ── ADD ENTRY ─────────────────────────────────────────────────────────────
+function addEntry() {
+  if (!validate()) return;
+
+  const seasonalVal = document.getElementById('f-seasonal').value;
+  const seasonal = seasonalVal === 'custom'
+    ? document.getElementById('f-custom-seasonal').value
+    : seasonalVal === 'none' ? 'None' : seasonalVal;
+
+  const sorted = [...selectedDays].sort((a,b) => DAYS_ORDER.indexOf(a) - DAYS_ORDER.indexOf(b));
+  const dayTimeArr = [];
+  sorted.forEach(d => {
+    const val = dayTimes[d];
+    if (val === 'ALL') {
+      dayTimeArr.push({ day: d, time: '00:00-23:59' });
+    } else {
+      const times = (val && val.length) ? val : [''];
+      times.forEach(t => dayTimeArr.push({ day: d, time: t }));
+    }
+  });
+
+  entries.push({
+    customer:   document.getElementById('f-customer').value,
+    accNo:      document.getElementById('f-accno').value,
+    allotType,
+    validFrom:  document.getElementById('f-valid-from').value,
+    validTo:    document.getElementById('f-valid-to').value,
+    routeLeg:   msState.route.join(', '),
+    vessel:     document.getElementById('f-vessel').value || 'Any',
+    allotments: document.getElementById('f-allotments').value,
+    unitTypes:  msState.unit.join(', '),
+    exclTypes:  msState.excl.length ? msState.excl.join(', ') : 'None',
+    dayTimes:   dayTimeArr,
+    seasonal,
+  });
+
+  clearForm();
+  renderEntries();
+  toast('Entry added');
+}
+
+// ── CLEAR FORM ────────────────────────────────────────────────────────────
+function clearForm() {
+  document.getElementById('f-customer').value = '';
+  document.getElementById('f-accno').innerHTML = '<option value="">Select customer first</option>';
+  document.getElementById('f-accno').disabled = true;
+  document.getElementById('f-valid-from').value = '';
+  document.getElementById('f-valid-to').value = '';
+  document.getElementById('f-seasonal').value = 'none';
+  document.getElementById('custom-seasonal-wrap').style.display = 'none';
+  document.getElementById('f-vessel').value = '';
+  document.getElementById('f-allotments').value = '';
+  allotType = '';
+  document.getElementById('yn-yes').classList.remove('active','err-border');
+  document.getElementById('yn-no').classList.remove('active','err-border');
+  selectedDays = []; dayTimes = {};
+  msState = { route: [], unit: [], excl: [] };
+  ['route','unit','excl'].forEach(renderMs);
+  renderDays();
+  ['e-customer','e-accno','e-allottype','e-valid-from','e-valid-to','e-route','e-allotments','e-unit','e-days'].forEach(id => {
+    document.getElementById(id).textContent = '';
+  });
+}
+
+// ── RENDER ENTRIES ────────────────────────────────────────────────────────
+function renderEntries() {
+  document.getElementById('entries-label').textContent = `Entries (${entries.length})`;
+  document.getElementById('csv-toggle-btn').style.display = entries.length ? 'block' : 'none';
+  if (!entries.length) {
+    document.getElementById('entries-list').innerHTML = '<div class="empty-state">No entries added yet</div>';
+    document.getElementById('csv-panel').style.display = 'none';
+    showCSV = false;
+    document.getElementById('csv-toggle-btn').textContent = 'Export CSV ↓';
+    return;
+  }
+  document.getElementById('entries-list').innerHTML = entries.map((e, i) => `
+    <div class="entry-card">
+      <button class="entry-remove" onclick="removeEntry(${i})" title="Remove">×</button>
+      <div class="entry-top">
+        <span class="badge ${e.allotType === 'Contractual' ? 'badge-contractual' : 'badge-noncontractual'}">${e.allotType}</span>
+        <span class="entry-name">${e.customer} · ${e.accNo} · ${e.routeLeg}</span>
+      </div>
+      <div class="entry-meta">
+        <span>Units: <b>${e.unitTypes}</b></span>
+        ${e.exclTypes !== 'None' ? `<span>Excl: <b>${e.exclTypes}</b></span>` : ''}
+        <span>Allotments: <b>${e.allotments}</b></span>
+        <span>Days: <b>${e.dayTimes.map(d => d.time ? `${d.day} (${d.time})` : d.day).join(', ')}</b></span>
+        <span>Valid: ${e.validFrom} → ${e.validTo}</span>
+        ${e.seasonal !== 'None' ? `<span>Seasonal: <b>${e.seasonal}</b></span>` : ''}
+        <span>Vessel: ${e.vessel}</span>
+      </div>
+    </div>
+  `).join('');
+  if (showCSV) refreshCSV();
+}
+
+function removeEntry(i) {
+  entries.splice(i, 1);
+  renderEntries();
+}
+
+// ── CSV ───────────────────────────────────────────────────────────────────
+function buildCSV() {
+  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  const rows = entries.flatMap(e =>
+    e.dayTimes.map(({day, time}) =>
+      [e.accNo, e.customer, e.allotType, e.validFrom, e.validTo, e.routeLeg,
+       e.vessel, e.allotments, e.unitTypes, e.exclTypes, day, time, e.seasonal].map(esc).join(',')
+    )
+  );
+  return [CSV_HEADERS.map(esc).join(','), ...rows].join('\n');
+}
+
+function refreshCSV() {
+  document.getElementById('csv-text').value = buildCSV();
+}
+
+function toggleCSV() {
+  showCSV = !showCSV;
+  document.getElementById('csv-panel').style.display = showCSV ? 'block' : 'none';
+  document.getElementById('csv-toggle-btn').textContent = showCSV ? 'Hide CSV' : 'Export CSV ↓';
+  if (showCSV) refreshCSV();
+}
+
+function copyCSV() {
+  const ta = document.getElementById('csv-text');
+  ta.select();
+  document.execCommand('copy');
+  const btn = document.getElementById('copy-btn');
+  btn.textContent = 'Copied!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = 'Copy all'; btn.classList.remove('copied'); }, 2000);
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────────────
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast' + (isError ? ' error' : '');
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>
